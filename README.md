@@ -113,6 +113,140 @@ The ADK agent handles the complete OAuth2 token lifecycle:
 3. **Token Refresh**: Automatically refreshes expired tokens using refresh token
 4. **Error Handling**: Re-initiates auth flow if refresh fails
 
+### How ADK Determines Authentication Flow
+
+ADK uses `header_provider` and `auth_scheme` for **different purposes** at **different stages**:
+
+#### When `header_provider` is Used
+
+**Purpose**: MCP protocol-level communication (server connection)
+
+**Triggers**:
+- `initialize` - Initial MCP handshake
+- `listTools` - Discovering available tools
+- `callTool` - Executing tools
+- Any MCP protocol method
+
+The `header_provider` is **always called** for every HTTP request to the MCP server.
+
+```python
+def get_mcp_headers(context: ReadonlyContext) -> dict[str, str]:
+    # Uses client credentials to get token
+    # Called for every MCP server request
+    return {"Authorization": f"Bearer {token}"}
+```
+
+#### When `auth_scheme`/`auth_credential` is Used
+
+**Purpose**: Tool-level user authentication
+
+**Triggers**:
+- **Only when a tool is executed** (`callTool`)
+- **Only if `auth_scheme` is configured**
+- ADK checks if valid cached credentials exist
+
+**Flow**:
+1. User asks to call a tool
+2. ADK checks: "Does this McpToolset have auth_scheme configured?"
+3. If yes: "Do we have valid cached credentials?"
+4. If no cached credentials: Initiate OAuth flow (show consent screen)
+5. After getting credentials: Execute tool with user's token
+
+#### ADK Decision Tree
+
+```
+MCP Server Request (initialize, listTools):
+  ├─ ADK calls header_provider()
+  └─ Uses returned headers for HTTP request
+
+Tool Execution (callTool):
+  ├─ ADK calls header_provider() for MCP communication
+  └─ IF auth_scheme is configured:
+      ├─ Check for cached credentials (via oauth_helper)
+      ├─ If no valid credentials:
+      │   └─ Initiate OAuth flow (authorization code grant)
+      └─ Include user token in tool execution context
+```
+
+#### Authentication Stages in Practice
+
+**Stage 1: Agent Initialization**
+```
+User runs: adk web space_agent
+  ↓
+ADK → listTools (MCP method)
+  ├─ header_provider() called
+  │   └─ Returns: Client Credentials Token
+  └─ MCP server authenticates request
+      └─ Returns: Available tools list
+```
+
+**Stage 2: First Tool Call**
+```
+User asks: "What rocket launches are happening soon?"
+  ↓
+ADK → callTool (MCP method)
+  ├─ header_provider() called
+  │   └─ Returns: Client Credentials Token (for MCP protocol)
+  │
+  └─ auth_scheme configured?
+      └─ Yes → oauth_helper.get_user_credentials()
+          └─ No cached token found
+              └─ Return AuthConfig
+                  └─ ADK shows Auth0 consent screen
+                      └─ User authorizes
+                          └─ Authorization Code Grant flow
+                              └─ Cache user token
+                                  └─ Execute tool with user token
+```
+
+**Stage 3: Subsequent Tool Calls**
+```
+User asks: "Who is currently in space?"
+  ↓
+ADK → callTool (MCP method)
+  ├─ header_provider() called
+  │   └─ Returns: Client Credentials Token (for MCP protocol)
+  │
+  └─ auth_scheme configured?
+      └─ Yes → oauth_helper.get_user_credentials()
+          └─ Cached token found ✓
+              └─ Execute tool with cached user token
+                  └─ No consent screen needed
+```
+
+**Stage 4: Token Refresh**
+```
+User asks: "More launches please"
+  ↓
+ADK → callTool (MCP method)
+  ├─ header_provider() called
+  │   └─ Returns: Client Credentials Token (for MCP protocol)
+  │
+  └─ auth_scheme configured?
+      └─ Yes → oauth_helper.get_user_credentials()
+          └─ Cached token expired ✗
+              └─ Refresh token found ✓
+                  └─ OAuth2CredentialRefresher.refresh()
+                      └─ Get new access + refresh tokens
+                          └─ Update cache
+                              └─ Execute tool with new user token
+```
+
+#### Why Both Authentication Methods?
+
+Our dual-auth approach serves different needs:
+
+1. **`header_provider`**: MCP server itself requires Auth0 authentication to even connect
+2. **`auth_scheme`**: Tools may need user-specific authentication (different from server auth)
+
+**Other configurations possible**:
+- **Only `header_provider`**: If MCP server requires auth but tools don't need user consent
+- **Only `auth_scheme`**: If MCP server is public but tools need user auth
+- **Neither**: If everything is public
+
+**Key insight**: `header_provider` is for **transport-level auth**, `auth_scheme` is for **tool-level auth**. ADK always uses `header_provider` for MCP communication, but only engages `auth_scheme` when tools are actually called.
+
 ## Project Structure
 
 ```
