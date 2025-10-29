@@ -69,6 +69,22 @@ GOOGLE_API_KEY=your_gemini_api_key
    - Automatically refreshed when expired (thanks to `offline_access` scope)
    - No manual token management required!
 
+**Important - How ADK Merges Authentication:**
+
+Based on ADK source code analysis, both `header_provider` and `auth_scheme` are converted to HTTP headers and merged:
+
+1. `auth_scheme` credentials → `Authorization: Bearer <user_token>`
+2. `header_provider()` → `Authorization: Bearer <client_credentials_token>`
+3. Both headers are merged, **`header_provider` wins** (applied last)
+
+**Result:** The MCP server receives the **client credentials token**, not the user token. The user OAuth flow happens and credentials are cached, but they get overridden by `header_provider` before reaching the MCP server.
+
+**Why this works:** Our MCP server validates any valid Auth0 token. It doesn't require user-specific permissions, so client credentials are sufficient.
+
+**For user-level permissions:** If you need the MCP server to receive user tokens, modify `get_mcp_headers()` to not set `Authorization` header when user credentials are available, or use `header_provider` only for non-Authorization headers.
+
+See `../ADK_AUTHENTICATION_INTERNALS.md` for detailed source code analysis.
+
 ### 3. Start the MCP Server
 
 Make sure your Apollo MCP server is running on `http://127.0.0.1:8000/mcp` with Auth0 authentication enabled.

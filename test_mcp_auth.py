@@ -1,19 +1,30 @@
 import requests
 import json
 import uuid
-# --- 1. CONFIGURATION: FILL THIS OUT ---
+import os
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
+
+# --- 1. CONFIGURATION: FROM ENVIRONMENT VARIABLES ---
 
 # --- From Auth0 Application Settings ---
-AUTH0_DOMAIN = "dev-iqf10dve67n73ys6.us.auth0.com"  # Your Auth0 domain
-CLIENT_ID = "lapH3mMRTSSBZDjulnyWzvPxYWvzdaA8"
-CLIENT_SECRET = "2jk2gnbIniV8UoEOG_q2azZg69SLCgA498O5SZva-Wk3crCUChlkizn82DNzpe1u"
+AUTH0_DOMAIN = os.getenv("AUTH0_DOMAIN")
+CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
+CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET")
 
 # --- From Auth0 API Settings ---
-# This is the "Identifier" of your API, the one your server expects
-API_AUDIENCE = "http://127.0.0.1:8000/mcp"
+API_AUDIENCE = os.getenv("AUTH0_API_AUDIENCE", "http://127.0.0.1:8000/mcp")
 
 # --- Your local MCP Server ---
 MCP_SERVER_URL = "http://127.0.0.1:8000/mcp"
+
+# Validate required environment variables
+if not all([AUTH0_DOMAIN, CLIENT_ID, CLIENT_SECRET]):
+    print("ERROR: Missing required environment variables!")
+    print("Please set AUTH0_DOMAIN, AUTH0_CLIENT_ID, and AUTH0_CLIENT_SECRET in .env file")
+    exit(1)
 
 # --- 2. STEP 1: GET THE ACCESS TOKEN FROM AUTH0 ---
 
