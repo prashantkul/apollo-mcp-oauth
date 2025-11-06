@@ -78,3 +78,9 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
+
+# Streamlit
+chatbot_ui/.streamlit/
+
+# Backup files
+chatbot_ui/app_working_backup.py
