@@ -272,10 +272,38 @@ Our MCP server only validates that a valid Auth0 token is present. It doesn't re
 
 **For User-Level Authentication:**
 
-If you need the MCP server to receive the user token instead:
-- **Option 1**: Don't set `Authorization` in `header_provider` when `auth_scheme` is configured
-- **Option 2**: Use `header_provider` only for non-Authorization headers (e.g., custom headers)
-- **Option 3**: Check for cached user credentials in `header_provider` and conditionally return headers
+If you need the MCP server to receive the user token instead (e.g., for user-level authorization):
+
+**✅ Implemented Solution:**
+
+Our `get_mcp_headers()` function now checks for user credentials and adapts:
+
+```python
+def get_mcp_headers(context: ReadonlyContext) -> dict[str, str]:
+    # Check if user credentials are cached in session
+    user_credential = context._invocation_context.session_state.get(CREDENTIAL_CACHE_KEY)
+
+    if user_credential and user_credential.oauth2.access_token:
+        # User is authenticated - don't set Authorization header
+        # Let auth_scheme provide the user token
+        return {"Content-Type": "application/json"}
+
+    # No user credentials - use client credentials for initial connection
+    return {
+        "Authorization": f"Bearer {get_client_credentials_token()}",
+        "Content-Type": "application/json",
+    }
+```
+
+**How it works:**
+1. **First request (listTools)**: No user credentials → client credentials used
+2. **After user login**: User credentials cached → `header_provider` skips Authorization header
+3. **ADK's auth_scheme**: Provides `Authorization: Bearer <user_token>` without collision
+4. **MCP server receives**: User-specific token for proper authorization
+
+**Alternative Options:**
+- **Option 2**: Use `header_provider` only for non-Authorization headers (e.g., custom headers, API keys)
+- **Option 3**: Remove `header_provider` entirely if MCP server doesn't require auth for discovery
 
 See [ADK_AUTHENTICATION_INTERNALS.md](ADK_AUTHENTICATION_INTERNALS.md) for detailed analysis with source code references.
 

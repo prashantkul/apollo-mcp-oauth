@@ -2,13 +2,13 @@
 
 OAuth approach (based on ADK sample pattern):
 - Auth0 authorization code grant flow for user authentication
-- Client credentials flow for initial MCP connection (listTools)
+- Anonymous MCP server discovery (initialize, tools/list)
+- User tokens for tool execution (true user-level authorization)
 - ADK-managed credential lifecycle via oauth_helper
 - Automatic token refresh with offline_access scope
 """
 
 import os
-import requests
 from typing import Union
 from google.adk.agents import LlmAgent
 from google.adk.agents.readonly_context import ReadonlyContext
@@ -21,6 +21,12 @@ from google.adk.tools.tool_context import ToolContext
 from fastapi.openapi.models import OAuthFlowAuthorizationCode, OAuthFlows
 
 from .oauth_helper import get_user_credentials
+from .storage_tool import save_conversation
+
+# load environment variables from .env file
+from dotenv import load_dotenv
+
+load_dotenv()
 
 
 # Auth0 configuration from environment variables (.env file)
@@ -61,30 +67,8 @@ def _get_credentials_or_auth_request(
     )
 
 
-def get_mcp_headers(context: ReadonlyContext) -> dict[str, str]:
-    """Provides Auth0 authentication headers for MCP server connection.
-
-    For initial MCP connection (listTools), we use client credentials flow
-    since we need a token before user authentication.
-    """
-    token_payload = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "audience": API_AUDIENCE,
-        "grant_type": "client_credentials",
-    }
-    token_url = f"https://{AUTH0_DOMAIN}/oauth/token"
-
-    token_response = requests.post(token_url, data=token_payload, timeout=10)
-    token_data = token_response.json()
-
-    if "access_token" not in token_data:
-        raise RuntimeError(f"Failed to get access token: {token_data}")
-
-    return {
-        "Authorization": f"Bearer {token_data['access_token']}",
-        "Content-Type": "application/json",
-    }
+# No longer needed! MCP server now allows anonymous discovery.
+# User tokens from auth_scheme will reach the server during tool execution.
 
 
 # Configure OAuth2 auth scheme for Auth0 with authorization code flow
@@ -110,19 +94,28 @@ auth_credential = AuthCredential(
     ),
 )
 
-# Create MCP toolset with both header_provider and auth config
-# header_provider: for MCP connection authentication
-# auth_scheme/credential: for tool-level authentication (ADK-managed)
-mcp_toolset = McpToolset(
-    connection_params=StreamableHTTPConnectionParams(
-        url="http://127.0.0.1:8000/mcp",
-        timeout=10.0,
-    ),
-    header_provider=get_mcp_headers,
-    auth_scheme=auth_scheme,
-    auth_credential=auth_credential,
-    tool_name_prefix="space",
-)
+# Create MCP toolset with user authentication
+# - MCP server allows anonymous discovery (initialize, tools/list)
+# - auth_scheme/credential: User authentication via OAuth2 authorization code flow
+#   (user tokens reach the MCP server for tool execution - true user-level authorization!)
+#
+# Authentication flow:
+# 1. Tool discovery (initialize, tools/list) - anonymous, no auth required
+# 2. Tool execution (tools/call) - requires user OAuth token from auth_scheme
+# 3. MCP server validates user token and can enforce per-user permissions
+
+def get_mcp_toolset():
+    """Create and return the MCP toolset on demand."""
+    return McpToolset(
+        connection_params=StreamableHTTPConnectionParams(
+            url="http://34.61.171.198:8000/mcp",
+            timeout=30.0,  # Increased timeout for better stability
+        ),
+        auth_scheme=auth_scheme,
+        auth_credential=auth_credential,
+        tool_name_prefix="space",
+        errlog=None,  # Avoid pickle errors during Agent Engine deployment
+    )
 
 # Define the root agent
 root_agent = LlmAgent(
@@ -148,5 +141,5 @@ Available tools allow you to:
 - Explore celestial bodies and space objects
 """,
     description="An AI agent that explores space data using The Space Devs GraphQL API through an authenticated MCP server",
-    tools=[mcp_toolset],
+    tools=[get_mcp_toolset(), save_conversation],
 )

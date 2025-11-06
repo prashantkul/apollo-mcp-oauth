@@ -15,10 +15,10 @@ CLIENT_ID = os.getenv("AUTH0_CLIENT_ID")
 CLIENT_SECRET = os.getenv("AUTH0_CLIENT_SECRET")
 
 # --- From Auth0 API Settings ---
-API_AUDIENCE = os.getenv("AUTH0_API_AUDIENCE", "http://127.0.0.1:8000/mcp")
+API_AUDIENCE = os.getenv("AUTH0_API_AUDIENCE", "http://34.61.171.198:8000/mcp")
 
 # --- Your local MCP Server ---
-MCP_SERVER_URL = "http://127.0.0.1:8000/mcp"
+MCP_SERVER_URL = "http://34.61.171.198:8000/mcp"
 
 # Validate required environment variables
 if not all([AUTH0_DOMAIN, CLIENT_ID, CLIENT_SECRET]):

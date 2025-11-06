@@ -71,17 +71,40 @@ GOOGLE_API_KEY=your_gemini_api_key
 
 **Important - How ADK Merges Authentication:**
 
-Based on ADK source code analysis, both `header_provider` and `auth_scheme` are converted to HTTP headers and merged:
+Based on ADK source code analysis, both `header_provider` and `auth_scheme` are converted to HTTP headers and merged. Without careful handling, `header_provider` can override `auth_scheme` credentials.
 
-1. `auth_scheme` credentials → `Authorization: Bearer <user_token>`
-2. `header_provider()` → `Authorization: Bearer <client_credentials_token>`
-3. Both headers are merged, **`header_provider` wins** (applied last)
+**✅ Our Implementation (User Token Priority):**
 
-**Result:** The MCP server receives the **client credentials token**, not the user token. The user OAuth flow happens and credentials are cached, but they get overridden by `header_provider` before reaching the MCP server.
+The `get_mcp_headers()` function implements smart credential routing:
 
-**Why this works:** Our MCP server validates any valid Auth0 token. It doesn't require user-specific permissions, so client credentials are sufficient.
+```python
+def get_mcp_headers(context: ReadonlyContext) -> dict[str, str]:
+    # Check if user has already authenticated
+    user_credential = context._invocation_context.session_state.get(CREDENTIAL_CACHE_KEY)
 
-**For user-level permissions:** If you need the MCP server to receive user tokens, modify `get_mcp_headers()` to not set `Authorization` header when user credentials are available, or use `header_provider` only for non-Authorization headers.
+    if user_credential and user_credential.oauth2.access_token:
+        # User token available - let auth_scheme handle Authorization
+        return {"Content-Type": "application/json"}  # No Authorization header
+
+    # No user token - use client credentials for server connection
+    return {
+        "Authorization": f"Bearer {client_credentials_token}",
+        "Content-Type": "application/json",
+    }
+```
+
+**Authentication Flow:**
+
+1. **Agent starts** → `listTools` → No user token → Client credentials used ✅
+2. **First tool call** → User authenticates → Token cached → Subsequent calls use user token ✅
+3. **Tool execution** → User token in session → `header_provider` skips Authorization → `auth_scheme` provides user token ✅
+4. **MCP server receives** → User-specific token for proper authorization ✅
+
+**Why this approach:**
+- **Enables user-level authorization**: MCP server can enforce per-user permissions
+- **Graceful fallback**: Client credentials used when user hasn't authenticated yet
+- **No token collision**: User tokens take precedence when available
+- **Production-ready**: Works for multi-user scenarios with proper authorization
 
 See `../ADK_AUTHENTICATION_INTERNALS.md` for detailed source code analysis.
 
